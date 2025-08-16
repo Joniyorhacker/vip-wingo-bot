@@ -1,79 +1,101 @@
-import time
-import requests
-from datetime import datetime
+import logging
+import asyncio
 import random
+from telegram import Update
+from telegram.ext import Application, CommandHandler, ContextTypes
 
-# ==============================
-# CONFIGURATION
-# ==============================
-BOT_TOKEN = "8348108389:AAGrurEUGwwmozWUXuA3Aa6zN0SG2lpcW7c"
-ADMINS = ["@shahedbintarek"]  # একাধিক এডমিন দিতে পারো
-REFER_LINK = "https://dkwin9.com/#/register?invitationCode=16532572738"
+# -------------------------------
+# Fixed Config (Secrets here)
+# -------------------------------
+TOKEN = "8380050511:AAHCU4h9lNDkQJMzU44kxE3Nx-Ujm6JTq2c"
+OWNER_ID = 6091430516
+REF_LINK = "https://dkwin9.com/#/register?invitationCode=16532572738"
 
-# ==============================
-# FUNCTIONS
-# ==============================
-def fetch_chat_ids():
-    """
-    গ্রুপে বট এড করা হলে স্বয়ংক্রিয়ভাবে সব গ্রুপের Chat ID detect করবে।
-    """
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
-    chat_ids = set()
-    try:
-        resp = requests.get(url).json()
-        for update in resp.get("result", []):
-            chat = update.get("message", {}).get("chat", {})
-            if chat and chat.get("type") in ["group", "supergroup"]:
-                chat_ids.add(chat["id"])
-        return list(chat_ids)
-    except Exception as e:
-        print("Error fetching chat IDs:", e)
-        return []
+# -------------------------------
+# Logger Setup
+# -------------------------------
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
+)
 
-def send_signal(chat_id, message):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    payload = {"chat_id": chat_id, "text": message}
-    try:
-        requests.post(url, data=payload)
-    except Exception as e:
-        print(f"Error sending message to {chat_id}: {e}")
+# -------------------------------
+# Global Variables
+# -------------------------------
+signal_running = False
+current_chat_id = None
+preyod_number = 1  # Market period number
+last_number = None
 
-def get_market_signal():
-    """
-    লাইভ মার্কেট সিগন্যালের জন্য এখানে API/AI logic বসানো যাবে
-    বর্তমানে Random সিগন্যাল ব্যবহার হচ্ছে
-    """
-    signals = ["BUY BTC", "SELL BTC", "HOLD BTC", "BUY ETH", "SELL ETH", "HOLD ETH"]
-    return random.choice(signals)
+# -------------------------------
+# Commands
+# -------------------------------
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        f"ðŸ¤– SHAHED AI PREDICTION BOT\n\n"
+        f"ðŸ”¹ Auto signal bot for DK WIN\n"
+        f"ðŸ”¹ Owner: @shahedbintarek\n"
+        f"ðŸ”¹ Join via link: {REF_LINK}\n\n"
+        f"Commands:\n"
+        f"/signal_on - Start auto signals in this group\n"
+        f"/signal_off - Stop auto signals"
+    )
 
-# ==============================
-# MAIN LOOP
-# ==============================
+async def signal_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global signal_running, current_chat_id
+    signal_running = True
+    current_chat_id = update.effective_chat.id
+    await update.message.reply_text("âœ… Auto Signal Started")
+    asyncio.create_task(auto_signal(context))
+
+async def signal_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global signal_running
+    signal_running = False
+    await update.message.reply_text("ðŸ›‘ Auto Signal Stopped")
+
+# -------------------------------
+# Signal System
+# -------------------------------
+async def auto_signal(context: ContextTypes.DEFAULT_TYPE):
+    global signal_running, current_chat_id
+    while signal_running and current_chat_id:
+        await send_signal(current_chat_id, context)
+        await asyncio.sleep(60)  # à¦ªà§à¦°à¦¤à¦¿ à§§ à¦®à¦¿à¦¨à¦¿à¦Ÿà§‡ à¦¨à¦¤à§à¦¨ signal
+
+async def send_signal(chat_id, context: ContextTypes.DEFAULT_TYPE):
+    global preyod_number, last_number
+
+    # Random number generate
+    number = random.randint(0, 9)
+    last_number = number
+
+    # Small/Big logic
+    bet = "SMALL" if number % 2 == 1 else "BIG"
+
+    message = (
+        f"ðŸ“Š SHAHED AI PREDICTION BOT\n\n"
+        f"Preyod number - {preyod_number}\n"
+        f"BET - {bet}\n"
+        f"Number - {number}\n"
+        f"Maintain - 8 level\n\n"
+        f"ðŸ”¹ Join - {REF_LINK}"
+    )
+
+    await context.bot.send_message(chat_id=chat_id, text=message)
+    preyod_number += 1  # Market period auto increase
+
+# -------------------------------
+# Main Runner
+# -------------------------------
 def main():
-    print("KGF VIP New Update Board চালু হচ্ছে...")
-    
-    chat_ids = []
-    while not chat_ids:
-        chat_ids = fetch_chat_ids()
-        if not chat_ids:
-            print("গ্রুপে বটকে মেসেজ পাঠাও এবং অপেক্ষা করো...")
-            time.sleep(5)  # ৫ সেকেন্ড পর আবার চেক
+    app = Application.builder().token(TOKEN).build()
 
-    print(f"Detected Chat IDs: {chat_ids}")
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("signal_on", signal_on))
+    app.add_handler(CommandHandler("signal_off", signal_off))
 
-    # ২৪/৭ সিগন্যাল পাঠানো
-    while True:
-        signal = get_market_signal()
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        message = (
-            f"[{timestamp}] Signal: {signal}\n"
-            f"Refer: {REFER_LINK}\n"
-            f"Admin: {', '.join(ADMINS)}"
-        )
-        for chat_id in chat_ids:
-            send_signal(chat_id, message)
-        print(message)
-        time.sleep(1)  # প্রতি ১ সেকেন্ডে নতুন সিগন্যাল
+    print("âœ… SHAHED AI Bot is running...")
+    app.run_polling()
 
 if __name__ == "__main__":
     main()
