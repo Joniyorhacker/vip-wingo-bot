@@ -1,4 +1,12 @@
-import requests
+import subprocess, sys
+
+# --- Auto install requests if not installed ---
+try:
+    import requests
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "requests"])
+    import requests
+
 import asyncio
 import logging
 from telegram import Update
@@ -16,6 +24,8 @@ logging.basicConfig(
 )
 
 signal_running = False
+last_prediction = None  # শেষবার কি প্রেডিকশন করা হয়েছিল (BIG/SMALL)
+last_period = None      # শেষ preyod নম্বর
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -59,12 +69,10 @@ def get_market_data():
         data = r.json()
 
         # ⚠️ Adjust this part depending on real JSON structure
-        # Example if JSON looks like: {"data":{"list":[{"period":"202508161200","number":5}]}}
         if "data" in data and "list" in data["data"]:
             latest = data["data"]["list"][0]
             return latest.get("period"), latest.get("number")
 
-        # যদি JSON সরাসরি থাকে
         return data.get("period"), data.get("number")
 
     except Exception as e:
@@ -74,25 +82,39 @@ def get_market_data():
 
 async def auto_signal(context: ContextTypes.DEFAULT_TYPE):
     """Send signal every 1 minute"""
-    global signal_running
+    global signal_running, last_prediction, last_period
     while signal_running:
         period, number = get_market_data()
         if period and number is not None:
-            bet = "SMALL" if number % 2 == 1 else "BIG"
+            # নতুন preyod হলে চেক করবো
+            if period != last_period:
+                # যদি আগের prediction থাকে, তাহলে win/loss result দেখাবো
+                if last_prediction is not None:
+                    actual = "SMALL" if number % 2 == 1 else "BIG"
+                    if last_prediction == actual:
+                        await context.bot.send_message(
+                            chat_id=OWNER_ID,
+                            text="✅ WIN — Next Ready..."
+                        )
+                    # যদি loss হয় → কিছুই বলবে না
 
-            message = (
-                f"🤖 𝑺𝑯𝑨𝑯𝑬𝑫 𝑨𝑰 𝑷𝑹𝑬𝑫𝑰𝑪𝑻𝑰𝑶𝑵\n\n"
-                f"Wingo - 1 Minute\n"
-                f"Step Maintain - 7/8\n\n"
-                f"Preyod Number - {period}\n"
-                f"Bet - [{bet}]\n"
-                f"Number - [{number}]\n\n"
-                f"Owner - @shahedbintarek\n"
-                f"Join - {REF_LINK}"
-            )
-            await context.bot.send_message(chat_id=OWNER_ID, text=message)
+                # এবার নতুন prediction তৈরি
+                bet = "SMALL" if number % 2 == 0 else "BIG"  # simple random style
+                last_prediction = bet
+                last_period = period
 
-        await asyncio.sleep(60)  # প্রতি 1 মিনিটে আপডেট
+                message = (
+                    f"🤖 𝑺𝑯𝑨𝑯𝑬𝑫 𝑨𝑰 𝑷𝑹𝑬𝑫𝑰𝑪𝑻𝑰𝑶𝑵\n\n"
+                    f"Wingo - 1 Minute\n"
+                    f"Step Maintain - 7/8\n\n"
+                    f"Preyod Number - {period}\n"
+                    f"Bet - [{bet}]\n"
+                    f"Join - {REF_LINK}\n\n"
+                    f"Owner - @shahedbintarek"
+                )
+                await context.bot.send_message(chat_id=OWNER_ID, text=message)
+
+        await asyncio.sleep(10)  # প্রতি 10s এ চেক করবে (1 মিনিটে 6 বার চেক)
 
 
 def main():
