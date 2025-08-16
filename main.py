@@ -19,7 +19,7 @@ signal_running = False
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start command response"""
+    """Start command"""
     if update.effective_user.id == OWNER_ID:
         await update.message.reply_text("✅ Owner Connected\nUse /signal_on to start signals")
     else:
@@ -53,18 +53,27 @@ async def signal_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def get_market_data():
-    """Fetch Real Market Period & Number"""
+    """Fetch Real Market Data"""
     try:
         r = requests.get(API_URL, timeout=5)
         data = r.json()
+
+        # ⚠️ Adjust this part depending on real JSON structure
+        # Example if JSON looks like: {"data":{"list":[{"period":"202508161200","number":5}]}}
+        if "data" in data and "list" in data["data"]:
+            latest = data["data"]["list"][0]
+            return latest.get("period"), latest.get("number")
+
+        # যদি JSON সরাসরি থাকে
         return data.get("period"), data.get("number")
+
     except Exception as e:
         print("API Error:", e)
         return None, None
 
 
 async def auto_signal(context: ContextTypes.DEFAULT_TYPE):
-    """Send auto signals to owner only"""
+    """Send signal every 1 minute"""
     global signal_running
     while signal_running:
         period, number = get_market_data()
@@ -72,22 +81,18 @@ async def auto_signal(context: ContextTypes.DEFAULT_TYPE):
             bet = "SMALL" if number % 2 == 1 else "BIG"
 
             message = (
-                f"𝑺𝑯𝑨𝑯𝑬𝑫 𝑨𝑰 𝑷𝑹𝑬𝑫𝑰𝑪𝑻𝑰𝑶𝑵\n\n"
-                f"Wingo - 1 minutes\n"
-                f"Step maintain - 7/8\n"
-                f"Preyod number - {period}\n"
-                f"Bet - [ {bet} ]\n"
-                f"Number - [ {number} ]\n"
+                f"🤖 𝑺𝑯𝑨𝑯𝑬𝑫 𝑨𝑰 𝑷𝑹𝑬𝑫𝑰𝑪𝑻𝑰𝑶𝑵\n\n"
+                f"Wingo - 1 Minute\n"
+                f"Step Maintain - 7/8\n\n"
+                f"Preyod Number - {period}\n"
+                f"Bet - [{bet}]\n"
+                f"Number - [{number}]\n\n"
+                f"Owner - @shahedbintarek\n"
                 f"Join - {REF_LINK}"
             )
+            await context.bot.send_message(chat_id=OWNER_ID, text=message)
 
-            # Send only to Owner inbox
-            try:
-                await context.bot.send_message(chat_id=OWNER_ID, text=message)
-            except Exception as e:
-                print("Send Error:", e)
-
-        await asyncio.sleep(60)  # প্রতি 1 মিনিটে
+        await asyncio.sleep(60)  # প্রতি 1 মিনিটে আপডেট
 
 
 def main():
