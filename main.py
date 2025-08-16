@@ -5,11 +5,13 @@ import requests
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
+# ==== CONFIG ====
 TOKEN = "8380050511:AAHCU4h9lNDkQJMzU44kxE3Nx-Ujm6JTq2c"
 OWNER_ID = 6091430516
 REF_LINK = "https://dkwin9.com/#/register?invitationCode=16532572738"
 API_URL = "https://draw.ar-lottery01.com/WinGo/WinGo_1M.json"
 
+# ==== LOGGING ====
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
@@ -17,8 +19,9 @@ logging.basicConfig(
 
 signal_running = False
 
+# ==== GET LIVE PREYOD NUMBER ====
 def get_market_data():
-    """Fetch Real Preyod Number"""
+    """Fetch Real Preyod Number from API"""
     try:
         r = requests.get(API_URL, timeout=5)
         data = r.json()
@@ -28,6 +31,7 @@ def get_market_data():
         print("API Error:", e)
         return None
 
+# ==== COMMANDS ====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id == OWNER_ID:
         await update.message.reply_text(
@@ -40,7 +44,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text(
             f"🤖 𝑺𝑯𝑨𝑯𝑬𝑫 𝑨𝑰 𝑷𝑹𝑬𝑫𝑰𝑪𝑻𝑰𝑶𝑵\n\n"
-            f"🔹 Join - {REF_LINK}"
+            f"👉 Join here: {REF_LINK}"
         )
 
 async def signal_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -49,7 +53,15 @@ async def signal_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("❌ Only owner can start signals")
 
     signal_running = True
-    await update.message.reply_text("✅ Auto Signal Started")
+    await update.message.reply_text("✅ Auto Signal Started (Debug Mode)")
+
+    # Debug: show API response
+    try:
+        r = requests.get(API_URL, timeout=5)
+        await context.bot.send_message(chat_id=OWNER_ID, text=f"API Response:\n{r.text[:400]}...")
+    except Exception as e:
+        await context.bot.send_message(chat_id=OWNER_ID, text=f"Error fetching API: {e}")
+
     asyncio.create_task(auto_signal(context))
 
 async def signal_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -60,9 +72,11 @@ async def signal_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
     signal_running = False
     await update.message.reply_text("🛑 Auto Signal Stopped")
 
+# ==== SEND SIGNAL ====
 async def send_signal(context: ContextTypes.DEFAULT_TYPE):
     preyod_number = get_market_data()
     if not preyod_number:
+        await context.bot.send_message(chat_id=OWNER_ID, text="⚠️ API Error - Preyod Number Missing")
         return
 
     number = random.randint(0, 9)
@@ -79,12 +93,14 @@ async def send_signal(context: ContextTypes.DEFAULT_TYPE):
     )
     await context.bot.send_message(chat_id=OWNER_ID, text=message)
 
+# ==== AUTO SIGNAL LOOP ====
 async def auto_signal(context: ContextTypes.DEFAULT_TYPE):
     global signal_running
     while signal_running:
         await send_signal(context)
         await asyncio.sleep(60)  # Wingo 1 Minute
 
+# ==== MAIN ====
 def main():
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
