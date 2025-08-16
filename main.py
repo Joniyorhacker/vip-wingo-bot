@@ -2,25 +2,23 @@ import json
 import os
 import time
 from pathlib import Path
-from datetime import datetime
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from keep_alive import keep_alive
 from signals import generate_signal
 
-# ------------------------------
-# ✅ এখানে তোমার ডেটা হার্ডকোড
+# 🔐 BOT CONFIGURATION
 BOT_TOKEN = "8348108389:AAGrurEUGwwmozWUXuA3Aa6zN0SG2lpcW7c"
 OWNER_ID = 6091430516
 REF_LINK = "https://dkwin9.com/#/register?invitationCode=16532572738"
-DEFAULT_WINDOW_MINUTES = 1
 DATA_PATH = "storage/db.json"
-# ------------------------------
+DEFAULT_WINDOW_MINUTES = 1
 
+# 🔧 DB INIT
 Path("storage").mkdir(exist_ok=True)
 if not Path(DATA_PATH).exists():
-    with open(DATA_PATH, "w", encoding="utf-8") as f:
+    with open(DATA_PATH, "w") as f:
         json.dump({
             "users": {},
             "broadcast": [],
@@ -53,6 +51,8 @@ def _has_premium(user):
 def _is_owner(user_id):
     return user_id == OWNER_ID
 
+# 📌 Commands
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     data = _load()
@@ -60,12 +60,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     _save(data)
     await update.message.reply_text(
         f"👋 Hi {user.first_name}!\n\n"
-        f"🔗 Register first using:\n{REF_LINK}\n"
-        f"Then send `/uid <your_uid>` to get verified.\n"
-        f"• /signal <period> — get signal\n"
-        f"• /subscribe — 1min signal\n"
-        f"• /status — check status\n"
-        f"Owner: @shahedbintarek | KGS Team"
+        f"🔗 Register here:\n{REF_LINK}\n\n"
+        f"Then send: `/uid <your_uid>`\n"
+        f"Available commands:\n"
+        f"• /signal <period>\n• /subscribe\n• /status\n• /unsubscribe\n\n"
+        f"Owner: @shahedbintarek\nTeam: KGS | CLUB HACK 6",
+        parse_mode="Markdown"
     )
 
 async def uid(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -75,27 +75,50 @@ async def uid(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("Use: /uid <your_uid>")
     user["uid"] = context.args[0].strip()
     _save(data)
-    await update.message.reply_text("✅ UID saved. Wait for owner verification.")
+    await update.message.reply_text("✅ UID saved! Wait for owner approval.")
+
+async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != OWNER_ID:
+        return await update.message.reply_text("⛔ Only owner can use this.")
+    if not context.args:
+        return await update.message.reply_text("Use: /approve <telegram_user_id>")
+    
+    tg_id = context.args[0].strip()
+    data = _load()
+    user = _get_user(data, tg_id)
+    user["verified"] = True
+    user["premium_until"] = _now_ts() + 30*24*60*60  # 30 days premium
+    _save(data)
+    await update.message.reply_text(f"✅ Approved user {tg_id}")
+    try:
+        await context.bot.send_message(
+            chat_id=int(tg_id),
+            text="🎉 You are now verified! Use /start to continue."
+        )
+    except:
+        pass
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = _load()
     user = _get_user(data, update.effective_user.id)
     premium = "✅" if _has_premium(user) else "❌"
     await update.message.reply_text(
-        f"🔎 Status:\nVerified: {user['verified']}\nPremium: {premium}\nSubscribed: {user['subscribed']}\nUID: {user['uid']}"
+        f"📊 Status:\nVerified: {user['verified']}\nPremium: {premium}\nSubscribed: {user['subscribed']}\nUID: {user['uid']}"
     )
 
 async def signal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = _load()
     user = _get_user(data, update.effective_user.id)
     if not user["verified"]:
-        return await update.message.reply_text("⛔ You are not verified.")
+        return await update.message.reply_text("⛔ You're not verified.")
     if not context.args:
         return await update.message.reply_text("Use: /signal <period>")
+    
     period = context.args[0].strip()
     sig = generate_signal(period, user.get("history", []))
     user["history"] = (user.get("history", []) + [sig["pick"]])[-20:]
     _save(data)
+    
     await update.message.reply_text(
         f"🎯 Signal for `{sig['period']}`:\n"
         f"Pick: **{sig['pick']}**\nConfidence: `{sig['confidence']}`",
@@ -106,17 +129,19 @@ async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = _load()
     user = _get_user(data, update.effective_user.id)
     if not user["verified"]:
-        return await update.message.reply_text("⛔ You are not verified.")
+        return await update.message.reply_text("⛔ You're not verified.")
     user["subscribed"] = True
     _save(data)
-    await update.message.reply_text("🔔 Subscribed to 1-minute signals.")
+    await update.message.reply_text("🔔 Subscribed to auto-signals.")
 
 async def unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = _load()
     user = _get_user(data, update.effective_user.id)
     user["subscribed"] = False
     _save(data)
-    await update.message.reply_text("🔕 Unsubscribed from signals.")
+    await update.message.reply_text("🔕 Unsubscribed from auto-signals.")
+
+# 🔁 Auto Signal Task
 
 async def auto_signal_job(app):
     data = _load()
@@ -142,13 +167,12 @@ def schedule_jobs(app):
     scheduler.start()
 
 def main():
-    if not BOT_TOKEN:
-        raise SystemExit("❌ BOT_TOKEN missing.")
     keep_alive()
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("uid", uid))
+    app.add_handler(CommandHandler("approve", approve))
     app.add_handler(CommandHandler("status", status))
     app.add_handler(CommandHandler("signal", signal))
     app.add_handler(CommandHandler("subscribe", subscribe))
