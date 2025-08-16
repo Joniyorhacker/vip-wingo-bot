@@ -1,40 +1,41 @@
 import json
 import os
 import time
-import asyncio
 from pathlib import Path
-from datetime import datetime, timedelta
-from typing import Dict, Any, List
-
-from telegram import Update, ForceReply
-from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes,
-)
-
+from datetime import datetime
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from keep_alive import keep_alive
-from config import BOT_TOKEN, OWNER_ID, REF_LINK, DEFAULT_WINDOW_MINUTES, DATA_PATH
 from signals import generate_signal
 
-# ---------- storage ----------
+# ------------------------------
+# ✅ এখানে তোমার ডেটা হার্ডকোড
+BOT_TOKEN = "8348108389:AAGrurEUGwwmozWUXuA3Aa6zN0SG2lpcW7c"
+OWNER_ID = 6091430516
+REF_LINK = "https://dkwin9.com/#/register?invitationCode=16532572738"
+DEFAULT_WINDOW_MINUTES = 1
+DATA_PATH = "storage/db.json"
+# ------------------------------
+
 Path("storage").mkdir(exist_ok=True)
 if not Path(DATA_PATH).exists():
     with open(DATA_PATH, "w", encoding="utf-8") as f:
         json.dump({
-            "users": {},      # tg_id -> {"uid": str|None, "verified": bool, "premium_until": ts|0, "subscribed": bool, "history": [str]}
-            "broadcast": [],  # last messages ids if needed
+            "users": {},
+            "broadcast": [],
             "window_minutes": DEFAULT_WINDOW_MINUTES
-        }, f, ensure_ascii=False, indent=2)
+        }, f, indent=2)
 
-def _load() -> Dict[str, Any]:
-    with open(DATA_PATH, "r", encoding="utf-8") as f:
+def _load():
+    with open(DATA_PATH) as f:
         return json.load(f)
 
-def _save(data: Dict[str, Any]):
-    with open(DATA_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+def _save(data):
+    with open(DATA_PATH, "w") as f:
+        json.dump(data, f, indent=2)
 
-def _get_user(data, tg_id: int):
+def _get_user(data, tg_id):
     tg_id = str(tg_id)
     if tg_id not in data["users"]:
         data["users"][tg_id] = {
@@ -43,253 +44,118 @@ def _get_user(data, tg_id: int):
         }
     return data["users"][tg_id]
 
-def _is_owner(user_id: int) -> bool:
-    return OWNER_ID and user_id == OWNER_ID
-
-def _now_ts() -> int:
+def _now_ts():
     return int(time.time())
 
-def _has_premium(u: Dict[str, Any]) -> bool:
-    return u.get("premium_until", 0) > _now_ts()
+def _has_premium(user):
+    return user.get("premium_until", 0) > _now_ts()
 
-# ---------- bot handlers ----------
+def _is_owner(user_id):
+    return user_id == OWNER_ID
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    u = update.effective_user
+    user = update.effective_user
     data = _load()
-    _get_user(data, u.id)
+    _get_user(data, user.id)
     _save(data)
-    text = (
-        f"👋 Hi {u.first_name}!\n\n"
-        f"🔗 **Register First** using this link:\n{REF_LINK}\n\n"
-        f"Then send your UID using:\n`/uid <your_uid>`\n\n"
-        f"After owner verification, you can:\n"
-        f"• `/signal <period>` — one-off signal\n"
-        f"• `/subscribe` — get auto 1-minute signals\n"
-        f"• `/status` — check status\n"
-        f"• `/help` — all commands\n\n"
+    await update.message.reply_text(
+        f"👋 Hi {user.first_name}!\n\n"
+        f"🔗 Register first using:\n{REF_LINK}\n"
+        f"Then send `/uid <your_uid>` to get verified.\n"
+        f"• /signal <period> — get signal\n"
+        f"• /subscribe — 1min signal\n"
+        f"• /status — check status\n"
         f"Owner: @shahedbintarek | KGS Team"
     )
-    await update.message.reply_text(text, disable_web_page_preview=True)
 
-async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    is_admin = _is_owner(update.effective_user.id)
-    user_part = (
-        "🧩 User Commands:\n"
-        "• /start — registration intro\n"
-        "• /uid <your_uid> — submit your DKWIN UID\n"
-        "• /status — your status\n"
-        "• /signal <period> — get a signal\n"
-        "• /subscribe — auto 1-minute signals\n"
-        "• /unsubscribe — stop auto signals\n"
-    )
-    admin_part = (
-        "\n🛠 Admin Commands:\n"
-        "• /verify <tg_id>\n"
-        "• /revoke <tg_id>\n"
-        "• /premium <tg_id> <days>\n"
-        "• /free <tg_id>\n"
-        "• /broadcast <text>\n"
-        "• /users — counts\n"
-        "• /setwindow <minutes> — default 1\n"
-    )
-    await update.message.reply_text(user_part + (admin_part if is_admin else ""))
-
-async def uid_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def uid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = _load()
-    u = _get_user(data, update.effective_user.id)
+    user = _get_user(data, update.effective_user.id)
     if not context.args:
-        return await update.message.reply_text("Send like: `/uid 12345678`", parse_mode="Markdown")
-    u["uid"] = context.args[0].strip()
+        return await update.message.reply_text("Use: /uid <your_uid>")
+    user["uid"] = context.args[0].strip()
     _save(data)
-    await update.message.reply_text("✅ UID received! Wait for owner verification.")
+    await update.message.reply_text("✅ UID saved. Wait for owner verification.")
 
-async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = _load()
-    u = _get_user(data, update.effective_user.id)
-    premium = "Yes" if _has_premium(u) else "No"
+    user = _get_user(data, update.effective_user.id)
+    premium = "✅" if _has_premium(user) else "❌"
     await update.message.reply_text(
-        f"🔎 Status:\nVerified: {u['verified']}\nPremium: {premium}\nSubscribed: {u['subscribed']}\nUID: {u['uid']}"
+        f"🔎 Status:\nVerified: {user['verified']}\nPremium: {premium}\nSubscribed: {user['subscribed']}\nUID: {user['uid']}"
     )
 
-async def subscribe_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    data = _load()
-    u = _get_user(data, update.effective_user.id)
-    if not u["verified"]:
-        return await update.message.reply_text("You must be verified by owner first.")
-    u["subscribed"] = True
-    _save(data)
-    await update.message.reply_text("🔔 Subscribed. You will receive 1-minute signals.")
-
-async def unsubscribe_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    data = _load()
-    u = _get_user(data, update.effective_user.id)
-    u["subscribed"] = False
-    _save(data)
-    await update.message.reply_text("🔕 Unsubscribed from auto signals.")
-
-async def signal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def signal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = _load()
     user = _get_user(data, update.effective_user.id)
     if not user["verified"]:
-        return await update.message.reply_text("You are not verified yet. Ask owner to verify.")
+        return await update.message.reply_text("⛔ You are not verified.")
     if not context.args:
-        return await update.message.reply_text("Use: `/signal <period>`", parse_mode="Markdown")
+        return await update.message.reply_text("Use: /signal <period>")
     period = context.args[0].strip()
     sig = generate_signal(period, user.get("history", []))
-    # update history
     user["history"] = (user.get("history", []) + [sig["pick"]])[-20:]
     _save(data)
     await update.message.reply_text(
-        f"🎯 Signal (window {sig['window']}):\n"
-        f"Period: `{sig['period']}`\nPick: **{sig['pick']}**\nConfidence: `{sig['confidence']}`",
+        f"🎯 Signal for `{sig['period']}`:\n"
+        f"Pick: **{sig['pick']}**\nConfidence: `{sig['confidence']}`",
         parse_mode="Markdown"
     )
 
-# ----- Admin -----
-async def verify_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _is_owner(update.effective_user.id):
-        return
-    if not context.args:
-        return await update.message.reply_text("Use: /verify <tg_id>")
-    tg_id = context.args[0].strip()
+async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = _load()
-    u = _get_user(data, tg_id)
-    u["verified"] = True
+    user = _get_user(data, update.effective_user.id)
+    if not user["verified"]:
+        return await update.message.reply_text("⛔ You are not verified.")
+    user["subscribed"] = True
     _save(data)
-    await update.message.reply_text(f"✅ Verified user {tg_id}")
+    await update.message.reply_text("🔔 Subscribed to 1-minute signals.")
 
-async def revoke_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _is_owner(update.effective_user.id):
-        return
-    if not context.args:
-        return await update.message.reply_text("Use: /revoke <tg_id>")
-    tg_id = context.args[0].strip()
+async def unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = _load()
-    u = _get_user(data, tg_id)
-    u["verified"] = False
-    u["subscribed"] = False
+    user = _get_user(data, update.effective_user.id)
+    user["subscribed"] = False
     _save(data)
-    await update.message.reply_text(f"♻️ Revoked user {tg_id}")
+    await update.message.reply_text("🔕 Unsubscribed from signals.")
 
-async def premium_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _is_owner(update.effective_user.id):
-        return
-    if len(context.args) < 2:
-        return await update.message.reply_text("Use: /premium <tg_id> <days>")
-    tg_id = context.args[0].strip()
-    days = int(context.args[1])
+async def auto_signal_job(app):
     data = _load()
-    u = _get_user(data, tg_id)
-    u["premium_until"] = int(time.time() + days * 86400)
-    _save(data)
-    await update.message.reply_text(f"🌟 Premium granted for {tg_id} ({days} days).")
-
-async def free_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _is_owner(update.effective_user.id):
-        return
-    if not context.args:
-        return await update.message.reply_text("Use: /free <tg_id>")
-    tg_id = context.args[0].strip()
-    data = _load()
-    u = _get_user(data, tg_id)
-    u["premium_until"] = 0
-    _save(data)
-    await update.message.reply_text(f"🆓 Premium removed for {tg_id}.")
-
-async def broadcast_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _is_owner(update.effective_user.id):
-        return
-    if not context.args:
-        return await update.message.reply_text("Use: /broadcast <text>")
-    text = " ".join(context.args)
-    data = _load()
-    users = list(data["users"].items())
-    ok = 0
-    for tg_id, u in users:
-        if u.get("verified"):
+    for tg_id, user in data["users"].items():
+        if user.get("verified") and user.get("subscribed"):
             try:
-                await context.bot.send_message(chat_id=int(tg_id), text=f"📣 Broadcast:\n{text}")
-                ok += 1
-            except Exception:
-                pass
-    await update.message.reply_text(f"Broadcast sent to {ok} verified users.")
-
-async def users_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _is_owner(update.effective_user.id):
-        return
-    d = _load()
-    total = len(d["users"])
-    verified = sum(1 for u in d["users"].values() if u.get("verified"))
-    subs = sum(1 for u in d["users"].values() if u.get("subscribed"))
-    await update.message.reply_text(f"👥 Users: total {total}, verified {verified}, subscribed {subs}")
-
-async def setwindow_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _is_owner(update.effective_user.id):
-        return
-    if not context.args:
-        return await update.message.reply_text("Use: /setwindow <minutes>")
-    m = max(1, int(context.args[0]))
-    d = _load()
-    d["window_minutes"] = m
-    _save(d)
-    await update.message.reply_text(f"⏱ Window set to {m} minutes. (Job will pick it next tick)")
-
-# ----- Auto job -----
-async def run_auto_signals(app):
-    d = _load()
-    window = d.get("window_minutes", DEFAULT_WINDOW_MINUTES)
-    # iterate all verified & subscribed
-    for tg_id, u in list(d["users"].items()):
-        if u.get("verified") and u.get("subscribed"):
-            try:
-                period = str(int(time.time()) // 60)  # simple rolling period
-                sig = generate_signal(period, u.get("history", []))
-                u["history"] = (u.get("history", []) + [sig["pick"]])[-20:]
-                _save(d)
+                period = str(int(time.time()) // 60)
+                sig = generate_signal(period, user.get("history", []))
+                user["history"] = (user.get("history", []) + [sig["pick"]])[-20:]
+                _save(data)
                 await app.bot.send_message(
                     chat_id=int(tg_id),
-                    text=(f"⏱ [Auto {sig['window']}] Period: `{sig['period']}`\n"
-                          f"Pick: **{sig['pick']}** | Confidence: `{sig['confidence']}`"),
+                    text=(f"⏱ Signal `{sig['period']}`:\n"
+                          f"Pick: **{sig['pick']}**\nConfidence: `{sig['confidence']}`"),
                     parse_mode="Markdown"
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"Failed to send to {tg_id}: {e}")
 
-def schedule_jobs(application):
+def schedule_jobs(app):
     scheduler = AsyncIOScheduler()
-    async def job():
-        await run_auto_signals(application)
-    # run every minute
-    scheduler.add_job(job, "interval", minutes=1, next_run_time=datetime.utcnow())
+    scheduler.add_job(lambda: auto_signal_job(app), "interval", minutes=1)
     scheduler.start()
 
-# ---------- bootstrap ----------
 def main():
     if not BOT_TOKEN:
-        raise SystemExit("BOT_TOKEN missing in env.")
+        raise SystemExit("❌ BOT_TOKEN missing.")
     keep_alive()
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    application = ApplicationBuilder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("uid", uid))
+    app.add_handler(CommandHandler("status", status))
+    app.add_handler(CommandHandler("signal", signal))
+    app.add_handler(CommandHandler("subscribe", subscribe))
+    app.add_handler(CommandHandler("unsubscribe", unsubscribe))
 
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_cmd))
-    application.add_handler(CommandHandler("uid", uid_cmd))
-    application.add_handler(CommandHandler("status", status_cmd))
-    application.add_handler(CommandHandler("subscribe", subscribe_cmd))
-    application.add_handler(CommandHandler("unsubscribe", unsubscribe_cmd))
-    application.add_handler(CommandHandler("signal", signal_cmd))
-
-    # admin
-    application.add_handler(CommandHandler("verify", verify_cmd))
-    application.add_handler(CommandHandler("revoke", revoke_cmd))
-    application.add_handler(CommandHandler("premium", premium_cmd))
-    application.add_handler(CommandHandler("free", free_cmd))
-    application.add_handler(CommandHandler("broadcast", broadcast_cmd))
-    application.add_handler(CommandHandler("users", users_cmd))
-    application.add_handler(CommandHandler("setwindow", setwindow_cmd))
-
-    schedule_jobs(application)
-    application.run_polling(close_loop=False)
+    schedule_jobs(app)
+    app.run_polling(close_loop=False)
 
 if __name__ == "__main__":
     main()
